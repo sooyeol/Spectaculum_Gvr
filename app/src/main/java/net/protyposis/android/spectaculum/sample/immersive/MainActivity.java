@@ -31,6 +31,8 @@ import net.protyposis.android.spectaculum.effects.ImmersiveSensorNavigation;
 import net.protyposis.android.spectaculum.effects.ImmersiveTouchNavigation;
 import net.protyposis.android.spectaculum.effects.Parameter;
 
+import com.google.vr.audio.*;
+
 public class MainActivity extends AppCompatActivity implements InputSurfaceHolder.Callback {
 
     private SpectaculumView mSpectaculumView;
