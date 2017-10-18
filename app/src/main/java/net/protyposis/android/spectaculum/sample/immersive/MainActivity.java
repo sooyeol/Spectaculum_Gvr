@@ -31,14 +31,22 @@ import net.protyposis.android.spectaculum.effects.ImmersiveSensorNavigation;
 import net.protyposis.android.spectaculum.effects.ImmersiveTouchNavigation;
 import net.protyposis.android.spectaculum.effects.Parameter;
 
-import com.google.vr.audio.*;
+import com.google.vr.sdk.audio.*;
 
 public class MainActivity extends AppCompatActivity implements InputSurfaceHolder.Callback {
 
     private SpectaculumView mSpectaculumView;
     private PlaybackControlView mPlaybackControlView;
+    private GvrAudioEngine audioEngine;
+
+    ImmersiveEffect immersiveEffect;
+
+    private Handler handler;
 
     private SimpleExoPlayer mExoPlayer;
+
+    TextView textView;
+    int counter;
 
     private final VideoSource[] mVideoSources = {
             // Orion360 Test Video: http://www.finwe.mobi/main/360-degree/orion360-test-images-videos/
@@ -73,7 +81,7 @@ public class MainActivity extends AppCompatActivity implements InputSurfaceHolde
         mPlaybackControlView.setShowDurationMs(Integer.MAX_VALUE);
 
         // Setup Spectaculum view for immersive content
-        final ImmersiveEffect immersiveEffect = new ImmersiveEffect(); // create effect instance
+        immersiveEffect = new ImmersiveEffect(); // create effect instance
         immersiveEffect.setMode(mVideoSources[mSelectedVideoSource].immersiveMode); // Set VR the mode for selected video source
         mSpectaculumView.addEffect(immersiveEffect); // add effect to view
 
@@ -87,6 +95,18 @@ public class MainActivity extends AppCompatActivity implements InputSurfaceHolde
         //immersiveSensorNavigation.attachTo(immersiveEffect);
         //immersiveSensorNavigation.activate();
 
+        float modelPosition[] = {0, 0, 0};
+
+        audioEngine = new GvrAudioEngine(this, GvrAudioEngine.RenderingMode.BINAURAL_HIGH_QUALITY);
+        int sourceId = audioEngine.createSoundObject("http://hosting.360heros.com/3D360Video/3D360/Demo3-House/3DH-Take1-Side-By-Side-1920x960.mp4");
+        audioEngine.setSoundObjectPosition(
+                sourceId, modelPosition[0], modelPosition[1], modelPosition[2]);
+        audioEngine.playSound(sourceId, true /* looped playback */);
+
+        counter = 0;
+        textView = (TextView) findViewById(R.id.testTextView);
+        textView.setText(String.valueOf(counter));
+
         // Listen to changes of the rotation matrix, e.g. to implement immersive audio (e.g. Ambisonics)
         final float[] rotationMatrix = new float[16];
         immersiveEffect.addListener(new Effect.Listener() {
@@ -97,6 +117,8 @@ public class MainActivity extends AppCompatActivity implements InputSurfaceHolde
                 // Attention: This listener is not called on the main thread, you need a handler
                 // to update components (e.g. UI elements) on the main thread! Alternatively, you
                 // can poll getRotationMatrix from the main thread without this listener.
+
+
             }
 
             @Override
@@ -223,16 +245,103 @@ public class MainActivity extends AppCompatActivity implements InputSurfaceHolde
                 ((TextView)findViewById(R.id.loadingindicator)).setText(R.string.loading_hint_error);
             }
         }, 10000);
+
+        handler = new Handler();
+//        // Start the initial runnable task by posting through the handler
+        handler.post(runnableCode);
+
     }
 
-    /**
-     * Release the ExoPlayer instance.
-     */
-    private void releasePlayer() {
+    private Runnable runnableCode = new Runnable() {
+        @Override
+        public void run() {
+            // Do something here on the main thread
+            float rotationMatrix[] = new float[16];
+            immersiveEffect.getRotationMatrix(rotationMatrix);
+            textView.setText(String.format("%.3f", rotationMatrix[0]));
+            float quaternion[] = rotationMatrixToQuaternion(rotationMatrix);
+            audioEngine.setHeadRotation(quaternion[0], quaternion[1], quaternion[2], quaternion[3]);
+            // Repeat this the same runnable code block again another 2 seconds
+            // 'this' is referencing the Runnable object
+            handler.postDelayed(this, 100);
+        }
+    };
+
+        /**
+         * Release the ExoPlayer instance.
+         */
+        private void releasePlayer() {
         if(mExoPlayer != null) {
             mExoPlayer.release();
             mExoPlayer = null;
         }
+    }
+
+    private static float sign(float x) {
+        return (x >= 0.0f) ? +1.0f : -1.0f;
+    }
+
+    private static float norm(float a, float b, float c, float d) {
+        return (float) Math.sqrt(a * a + b * b + c * c + d * d);
+    }
+
+    private static float[] rotationMatrixToQuaternion(float[] rotationMatrix) {
+        float r11 = rotationMatrix[0];
+        float r12 = rotationMatrix[1];
+        float r13 = rotationMatrix[2];
+        float r21 = rotationMatrix[4];
+        float r22 = rotationMatrix[5];
+        float r23 = rotationMatrix[6];
+        float r31 = rotationMatrix[8];
+        float r32 = rotationMatrix[9];
+        float r33 = rotationMatrix[10];
+
+        float q0 = ( r11 + r22 + r33 + 1.0f) / 4.0f;
+        float q1 = ( r11 - r22 - r33 + 1.0f) / 4.0f;
+        float q2 = (-r11 + r22 - r33 + 1.0f) / 4.0f;
+        float q3 = (-r11 - r22 + r33 + 1.0f) / 4.0f;
+
+        if(q0 < 0.0f) q0 = 0.0f;
+        if(q1 < 0.0f) q1 = 0.0f;
+        if(q2 < 0.0f) q2 = 0.0f;
+        if(q3 < 0.0f) q3 = 0.0f;
+
+        q0 = (float) Math.sqrt(q0);
+        q1 = (float)Math.sqrt(q1);
+        q2 = (float)Math.sqrt(q2);
+        q3 = (float)Math.sqrt(q3);
+
+        if(q0 >= q1 && q0 >= q2 && q0 >= q3) {
+            q0 *= +1.0f;
+            q1 *= sign(r32 - r23);
+            q2 *= sign(r13 - r31);
+            q3 *= sign(r21 - r12);
+        } else if(q1 >= q0 && q1 >= q2 && q1 >= q3) {
+            q0 *= sign(r32 - r23);
+            q1 *= +1.0f;
+            q2 *= sign(r21 + r12);
+            q3 *= sign(r13 + r31);
+        } else if(q2 >= q0 && q2 >= q1 && q2 >= q3) {
+            q0 *= sign(r13 - r31);
+            q1 *= sign(r21 + r12);
+            q2 *= +1.0f;
+            q3 *= sign(r32 + r23);
+        } else if(q3 >= q0 && q3 >= q1 && q3 >= q2) {
+            q0 *= sign(r21 - r12);
+            q1 *= sign(r31 + r13);
+            q2 *= sign(r32 + r23);
+            q3 *= +1.0f;
+        } else {
+            System.out.println("coding error\n");
+        }
+        float r = norm(q0, q1, q2, q3);
+        q0 /= r;
+        q1 /= r;
+        q2 /= r;
+        q3 /= r;
+
+        float q[] = {q0, q1, q2, q3};
+        return q;
     }
 
     private class VideoSource {
