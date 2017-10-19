@@ -5,7 +5,6 @@ import android.os.Handler;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.view.View;
-import android.widget.TextView;
 import android.widget.Toast;
 
 import com.google.android.exoplayer2.*;
@@ -46,9 +45,6 @@ public class MainActivity extends AppCompatActivity implements InputSurfaceHolde
     private Handler handler;
 
     private SimpleExoPlayer mExoPlayer;
-
-    TextView textView;
-    int counter;
 
     private final VideoSource[] mVideoSources = {
             // Orion360 Test Video: http://www.finwe.mobi/main/360-degree/orion360-test-images-videos/
@@ -246,7 +242,6 @@ public class MainActivity extends AppCompatActivity implements InputSurfaceHolde
             float rotationMatrix[] = new float[16];
             immersiveEffect.getRotationMatrix(rotationMatrix);
             float quaternion[] = rotationMatrixToQuaternion(rotationMatrix);
-            textView.setText(String.format("%.3f", quaternion[0]));
             gvrAudioProcessor.updateOrientation(quaternion[0], quaternion[1], quaternion[2], quaternion[3]);
             // Repeat this the same runnable code block again another 2 seconds
             // 'this' is referencing the Runnable object
