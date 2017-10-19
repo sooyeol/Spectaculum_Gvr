@@ -8,10 +8,13 @@ import android.view.View;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.google.android.exoplayer2.*;
+import com.google.android.exoplayer2.audio.*;
 import com.google.android.exoplayer2.DefaultLoadControl;
 import com.google.android.exoplayer2.ExoPlayerFactory;
 import com.google.android.exoplayer2.LoadControl;
 import com.google.android.exoplayer2.SimpleExoPlayer;
+import com.google.android.exoplayer2.ext.gvr.*;
 import com.google.android.exoplayer2.extractor.DefaultExtractorsFactory;
 import com.google.android.exoplayer2.extractor.ExtractorsFactory;
 import com.google.android.exoplayer2.source.ExtractorMediaSource;
@@ -31,10 +34,16 @@ import net.protyposis.android.spectaculum.effects.ImmersiveSensorNavigation;
 import net.protyposis.android.spectaculum.effects.ImmersiveTouchNavigation;
 import net.protyposis.android.spectaculum.effects.Parameter;
 
+
 public class MainActivity extends AppCompatActivity implements InputSurfaceHolder.Callback {
 
     private SpectaculumView mSpectaculumView;
     private PlaybackControlView mPlaybackControlView;
+    private GvrAudioProcessor gvrAudioProcessor;
+
+    ImmersiveEffect immersiveEffect;
+
+    private Handler handler;
 
     private SimpleExoPlayer mExoPlayer;
 
@@ -66,12 +75,9 @@ public class MainActivity extends AppCompatActivity implements InputSurfaceHolde
         // Register callbacks to initialize and release player
         mSpectaculumView.getInputHolder().addCallback(this);
 
-        // Set the playback control view duration to as long as possible so we do not have to
-        // handle view visibility toggling in this example
-        mPlaybackControlView.setShowDurationMs(Integer.MAX_VALUE);
 
         // Setup Spectaculum view for immersive content
-        final ImmersiveEffect immersiveEffect = new ImmersiveEffect(); // create effect instance
+        immersiveEffect = new ImmersiveEffect(); // create effect instance
         immersiveEffect.setMode(mVideoSources[mSelectedVideoSource].immersiveMode); // Set VR the mode for selected video source
         mSpectaculumView.addEffect(immersiveEffect); // add effect to view
 
@@ -84,6 +90,7 @@ public class MainActivity extends AppCompatActivity implements InputSurfaceHolde
         //ImmersiveSensorNavigation immersiveSensorNavigation = new ImmersiveSensorNavigation(this);
         //immersiveSensorNavigation.attachTo(immersiveEffect);
         //immersiveSensorNavigation.activate();
+
 
         // Listen to changes of the rotation matrix, e.g. to implement immersive audio (e.g. Ambisonics)
         final float[] rotationMatrix = new float[16];
@@ -149,15 +156,20 @@ public class MainActivity extends AppCompatActivity implements InputSurfaceHolde
          * https://google.github.io/ExoPlayer/guide.html#creating-the-player
          */
         // 1. Create a default TrackSelector
-        Handler mainHandler = new Handler();
-        TrackSelector trackSelector = new DefaultTrackSelector(mainHandler);
+        TrackSelector trackSelector = new DefaultTrackSelector();
 
         // 2. Create a default LoadControl
         LoadControl loadControl = new DefaultLoadControl();
 
         // 3. Create the player
-        SimpleExoPlayer player = ExoPlayerFactory.newSimpleInstance(this, trackSelector, loadControl);
-
+        RenderersFactory renderersFactory = new DefaultRenderersFactory(this) {
+            @Override
+            protected AudioProcessor[] buildAudioProcessors() {
+                gvrAudioProcessor = new GvrAudioProcessor();
+                return new AudioProcessor[] {gvrAudioProcessor};
+            }
+        };
+        SimpleExoPlayer player = ExoPlayerFactory.newSimpleInstance(renderersFactory, trackSelector);
 
         /*
          * Attaching the player to a view
@@ -166,7 +178,7 @@ public class MainActivity extends AppCompatActivity implements InputSurfaceHolde
          * https://google.github.io/ExoPlayer/guide.html#attaching-the-player-to-a-view
          */
         mPlaybackControlView.setPlayer(player);
-
+        mPlaybackControlView.show();
 
         /*
          * Configure player for SpectaculumView
@@ -189,10 +201,6 @@ public class MainActivity extends AppCompatActivity implements InputSurfaceHolde
                 // Inform user that he can look around in the video
                 Toast.makeText(MainActivity.this, R.string.drag, Toast.LENGTH_LONG).show();
             }
-
-            @Override
-            public void onVideoTracksDisabled() {
-            }
         });
 
 
@@ -207,10 +215,11 @@ public class MainActivity extends AppCompatActivity implements InputSurfaceHolde
         // Produces Extractor instances for parsing the media data.
         ExtractorsFactory extractorsFactory = new DefaultExtractorsFactory();
         // This is the MediaSource representing the media to be played.
-        MediaSource videoSource = new ExtractorMediaSource(Uri.parse(mVideoSources[mSelectedVideoSource].url),
+
+        MediaSource videoSource = new ExtractorMediaSource(Uri.parse("asset:///rain_or_shine.mp4"),
                 dataSourceFactory, extractorsFactory, null, null);
         // Prepare the player with the source.
-        player.prepare(videoSource, true);
+        player.prepare(videoSource);
 
         mExoPlayer = player;
 
@@ -221,16 +230,101 @@ public class MainActivity extends AppCompatActivity implements InputSurfaceHolde
                 ((TextView)findViewById(R.id.loadingindicator)).setText(R.string.loading_hint_error);
             }
         }, 10000);
+
+        handler = new Handler();
+        // Start the initial runnable task by posting through the handler
+        handler.post(runnableCode);
     }
 
-    /**
-     * Release the ExoPlayer instance.
-     */
-    private void releasePlayer() {
+    private Runnable runnableCode = new Runnable() {
+        @Override
+        public void run() {
+            // Do something here on the main thread
+            float rotationMatrix[] = new float[16];
+            immersiveEffect.getRotationMatrix(rotationMatrix);
+            float quaternion[] = rotationMatrixToQuaternion(rotationMatrix);
+            gvrAudioProcessor.updateOrientation(quaternion[0], quaternion[1], quaternion[2], quaternion[3]);
+            // Repeat this the same runnable code block again another 2 seconds
+            // 'this' is referencing the Runnable object
+            handler.postDelayed(this, 25);
+        }
+    };
+
+        /**
+         * Release the ExoPlayer instance.
+         */
+        private void releasePlayer() {
         if(mExoPlayer != null) {
             mExoPlayer.release();
             mExoPlayer = null;
         }
+    }
+
+    private static float sign(float x) {
+        return (x >= 0.0f) ? +1.0f : -1.0f;
+    }
+
+    private static float norm(float a, float b, float c, float d) {
+        return (float) Math.sqrt(a * a + b * b + c * c + d * d);
+    }
+
+    private static float[] rotationMatrixToQuaternion(float[] rotationMatrix) {
+        float r11 = rotationMatrix[0];
+        float r12 = rotationMatrix[1];
+        float r13 = rotationMatrix[2];
+        float r21 = rotationMatrix[4];
+        float r22 = rotationMatrix[5];
+        float r23 = rotationMatrix[6];
+        float r31 = rotationMatrix[8];
+        float r32 = rotationMatrix[9];
+        float r33 = rotationMatrix[10];
+
+        float q0 = ( r11 + r22 + r33 + 1.0f) / 4.0f;
+        float q1 = ( r11 - r22 - r33 + 1.0f) / 4.0f;
+        float q2 = (-r11 + r22 - r33 + 1.0f) / 4.0f;
+        float q3 = (-r11 - r22 + r33 + 1.0f) / 4.0f;
+
+        if(q0 < 0.0f) q0 = 0.0f;
+        if(q1 < 0.0f) q1 = 0.0f;
+        if(q2 < 0.0f) q2 = 0.0f;
+        if(q3 < 0.0f) q3 = 0.0f;
+
+        q0 = (float) Math.sqrt(q0);
+        q1 = (float)Math.sqrt(q1);
+        q2 = (float)Math.sqrt(q2);
+        q3 = (float)Math.sqrt(q3);
+
+        if(q0 >= q1 && q0 >= q2 && q0 >= q3) {
+            q0 *= +1.0f;
+            q1 *= sign(r32 - r23);
+            q2 *= sign(r13 - r31);
+            q3 *= sign(r21 - r12);
+        } else if(q1 >= q0 && q1 >= q2 && q1 >= q3) {
+            q0 *= sign(r32 - r23);
+            q1 *= +1.0f;
+            q2 *= sign(r21 + r12);
+            q3 *= sign(r13 + r31);
+        } else if(q2 >= q0 && q2 >= q1 && q2 >= q3) {
+            q0 *= sign(r13 - r31);
+            q1 *= sign(r21 + r12);
+            q2 *= +1.0f;
+            q3 *= sign(r32 + r23);
+        } else if(q3 >= q0 && q3 >= q1 && q3 >= q2) {
+            q0 *= sign(r21 - r12);
+            q1 *= sign(r31 + r13);
+            q2 *= sign(r32 + r23);
+            q3 *= +1.0f;
+        } else {
+            System.out.println("coding error\n");
+        }
+        float r = norm(q0, q1, q2, q3);
+        q0 /= r;
+        q1 /= r;
+        q2 /= r;
+        q3 /= r;
+
+        float q[] = {q0, q1, q2, q3};
+        return q;
     }
 
     private class VideoSource {
